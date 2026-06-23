@@ -1543,7 +1543,6 @@ async function createNotification(title, message, type='info', linkPage='') {
 async function loadClasses() {
   if (!APP.teacherId) return [];
   try {
-    // Only load classes owned by this teacher (RLS + filter)
     const data = await sbFetch(`classes?teacher_id=eq.${APP.teacherId}&is_archived=eq.false&order=created_at.asc`);
     APP.classes = data||[];
   } catch { APP.classes=[]; }
@@ -1561,7 +1560,6 @@ async function loadColsFromDB(classId, term) {
 async function loadStudentsForTerm(classId, term) {
   if (!classId) return [];
   try {
-    // Load students with their term-specific data
     const data = await sbFetch(`students?class_id=eq.${classId}&order=full_name.asc`);
     return data||[];
   } catch { return []; }
@@ -1589,7 +1587,6 @@ async function renderClasses() {
   
   await Promise.all(APP.classes.map(async c=>{
     try {
-      // Get current term data for each class
       const term = APP.currentTerm;
       const [stus, cols] = await Promise.all([
         sbFetch(`students?class_id=eq.${c.id}&order=full_name.asc`),
@@ -1650,7 +1647,6 @@ function buildTableHead() {
   cols.forEach(col => {
     html += `<th style="white-space:nowrap">${esc(col.column_name)}<br><span style="font-weight:400;font-size:9px;text-transform:none;letter-spacing:0;color:var(--txt3)">/ ${col.max_score}</span></th>`;
   });
-  // Teacher Avg column (comes before Avg %)
   html += '<th style="min-width:80px">Teacher Avg</th>';
   html += '<th>Avg %</th><th>Grade</th><th>Actions</th></tr>';
   $i('stu-tbl-head').innerHTML = html;
@@ -1681,7 +1677,6 @@ function renderStudents() {
     const avg=calcAvg(s,cols); const g=gradeFromPct(avg);
     const ini=(s.full_name||'?').split(' ').map(n=>n[0]).slice(0,2).join('').toUpperCase();
 
-    // Teacher Average display: Z / X (term-specific)
     let teacherAvgDisplay = '—';
     const numerator = getTeacherAvgNumerator(s, term);
     if (avgDenom && numerator != null) {
@@ -1829,7 +1824,6 @@ $i('saveAvgBtn').addEventListener('click', async () => {
     const term = APP.currentTerm;
     const suffix = getTermSuffix(term);
     const updates = [];
-    // Calculate Z = Y * (X / 100) for each student
     for (const s of students) {
       const Y = calcAvg(s, cols);
       if (Y == null) continue;
@@ -1837,7 +1831,6 @@ $i('saveAvgBtn').addEventListener('click', async () => {
       const fieldName = 'teacher_avg_numerator' + suffix;
       updates.push(sbFetch(`students?id=eq.${s.id}`, { method: 'PATCH', body: JSON.stringify({ [fieldName]: Z }) }));
     }
-    // Store X in the class record for this term
     const denomField = 'teacher_avg_denominator' + suffix;
     await sbFetch(`classes?id=eq.${APP.currentClassId}`, { method: 'PATCH', body: JSON.stringify({ [denomField]: X }) });
     await Promise.all(updates);
@@ -2255,7 +2248,6 @@ async function buildAnalytics(filterClassId) {
 
   if (!clsInfo.length) return;
 
-  // Charts simplified for brevity - keep existing chart logic
   const chartColors=['#FF6600','#10B981','#3B82F6','#8B5CF6','#F59E0B','#EF4444','#06B6D4','#84CC16'];
   const isDark=APP.theme==='dark';
   const gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
@@ -2275,7 +2267,6 @@ async function buildAnalytics(filterClassId) {
     scales:{x:{ticks:{color:fontColor,font:{size:10}},grid:{color:gridColor}},y:{ticks:{color:fontColor,font:{size:10}},grid:{color:gridColor}}}
   });
 
-  // Chart 1: Class avg bar
   if ($i('c-avgbar')) {
     const sortedCls=[...clsInfo].filter(c=>c.avg!=null).sort((a,b)=>b.avg-a.avg);
     APP.chartInstances.avgbar=new Chart($i('c-avgbar'),{type:'bar',data:{
@@ -2286,7 +2277,6 @@ async function buildAnalytics(filterClassId) {
     },options:{...baseChartOpts(),plugins:{...baseChartOpts().plugins,legend:{display:false}},scales:{...baseChartOpts().scales,y:{...baseChartOpts().scales.y,max:100,ticks:{...baseChartOpts().scales.y.ticks,callback:v=>v+'%'}}}}});
   }
   
-  // Chart 2: Grade distribution doughnut
   if ($i('c-grades')) {
     APP.chartInstances.grades=new Chart($i('c-grades'),{type:'doughnut',data:{
       labels:['A (≥80%)', 'B (70-79%)', 'C (50-69%)', 'D (40-49%)', 'E (<40%)', 'No Marks'],
@@ -2298,7 +2288,6 @@ async function buildAnalytics(filterClassId) {
       tooltip:{backgroundColor:isDark?'#111':'#fff',titleColor:isDark?'#fff':'#111',bodyColor:fontColor,borderColor:isDark?'rgba(255,255,255,.1)':'rgba(0,0,0,.1)',borderWidth:1}}}});
   }
   
-  // Chart 3: Top 10 students
   if ($i('c-top10')) {
     const allStudents=[];
     clsInfo.forEach(c=>c.students.forEach(s=>{const a=calcAvg(s,c.cols);if(a!=null)allStudents.push({name:s.full_name,avg:a,class:c.cls.class_name});}));
@@ -2310,7 +2299,6 @@ async function buildAnalytics(filterClassId) {
     },options:{indexAxis:'y',...baseChartOpts(),plugins:{...baseChartOpts().plugins,legend:{display:false}},scales:{x:{...baseChartOpts().scales.x,max:100,ticks:{...baseChartOpts().scales.x.ticks,callback:v=>v+'%'}},y:{...baseChartOpts().scales.y,ticks:{color:fontColor,font:{size:10}}}}}});
   }
   
-  // Chart 4: Pass/Fail stacked bar
   if ($i('c-passfail')) {
     APP.chartInstances.passfail=new Chart($i('c-passfail'),{type:'bar',data:{
       labels:clsInfo.map(c=>c.cls.class_name),
@@ -2322,7 +2310,6 @@ async function buildAnalytics(filterClassId) {
     },options:{...baseChartOpts(),...{scales:{x:{stacked:true,ticks:{color:fontColor,font:{size:10}},grid:{color:gridColor}},y:{stacked:true,ticks:{color:fontColor,font:{size:10}},grid:{color:gridColor}}}}}});
   }
 
-  // Insights
   const insights=[];
   if (topClass) insights.push({icon:'fa-crown',color:'var(--yellow)',text:`<strong>${esc(topClass.cls.class_name)}</strong> has the highest average at <strong>${topClass.avg.toFixed(1)}%</strong>`});
   if (worstClass && worstClass.cls.id !== topClass?.cls.id) insights.push({icon:'fa-arrow-trend-down',color:'var(--red)',text:`<strong>${esc(worstClass.cls.class_name)}</strong> has the lowest average at <strong>${worstClass.avg.toFixed(1)}%</strong> — consider targeted intervention`});
@@ -2356,7 +2343,6 @@ $i('runPredBtn').addEventListener('click',async()=>{
     const term = APP.currentTerm;
     const [stus,cols]=await Promise.all([sbFetch(`students?class_id=eq.${classId}`),loadColsFromDB(classId, term)]);
     if (!stus||!stus.length) { results.innerHTML='<div class="empty"><i class="fas fa-users"></i><p>No students in this class for Term ${term}</p></div>'; return; }
-    // ... rest of prediction logic remains similar but with term awareness
     const withRisk=stus.map(s=>{
       const avg=calcAvg(s,cols)||0;
       const assessments=cols.map(c=>s.scores?.[c.column_name]!=null?(s.scores[c.column_name]/c.max_score*100):null).filter(v=>v!=null);
@@ -2374,9 +2360,7 @@ $i('runPredBtn').addEventListener('click',async()=>{
       try { sbFetch('predictions',{method:'POST',body:JSON.stringify({student_id:s.id,class_id:classId,teacher_id:APP.teacherId,term:term,academic_year:APP.classes.find(c=>c.id===classId)?.academic_year||'2025-2026',current_avg:+avg.toFixed(2),risk_level:risk,trend,prediction_data:{scores:s.scores,colCount:cols.length}})}); } catch {}
       return {...s,avg,trend,trendVal,riskLabel,riskCls,risk};
     }).sort((a,b)=>a.avg-b.avg);
-    // ... rest of prediction rendering remains similar
     const high=withRisk.filter(s=>s.risk==='high').length, med=withRisk.filter(s=>s.risk==='medium').length, low=withRisk.filter(s=>s.risk==='low').length;
-    // Simplified output
     results.innerHTML=`
       <div class="stats-grid" style="margin-bottom:13px">
         <div class="stat-card"><div class="stat-icon ic-red"><i class="fas fa-circle-xmark"></i></div><div class="stat-label">High Risk</div><div class="stat-val c-red">${high}</div></div>
@@ -2700,29 +2684,68 @@ window.editSlot=async sid=>{
 };
 
 /* ═══════════════════════════════════════════════════════
-   REPORTS — WITH SCHOOL NAME, TEACHER NAME, SUBJECT & TEACHER AVG
+   REPORTS — FIXED: PROPER TEACHER SESSION ISOLATION
 ═══════════════════════════════════════════════════════ */
 async function populateRptClasses() {
   await loadClasses();
-  $i('rpt-class').innerHTML=APP.classes.map(c=>`<option value="${c.id}">${esc(c.class_name)}</option>`).join('');
+  // IMPORTANT: Only show classes belonging to THIS teacher
+  const teacherId = APP.teacherId;
+  const options = APP.classes.filter(c => c.teacher_id === teacherId)
+    .map(c => `<option value="${c.id}">${esc(c.class_name)}</option>`)
+    .join('');
+  $i('rpt-class').innerHTML = options || '<option value="">No classes found</option>';
 }
+
 $i('genRptBtn').addEventListener('click',async()=>{
-  const classId=$i('rpt-class').value, term=parseInt($i('rpt-term').value), year=$i('rpt-year').value;
+  const classId = $i('rpt-class').value;
+  const term = parseInt($i('rpt-term').value);
+  const year = $i('rpt-year').value;
+  
   if (!classId) { toast('Select a class','warn'); return; }
-  setBtn('genRptBtn',true,'<i class="fas fa-spinner fa-spin"></i> Generating…');
+  
+  // Verify this class belongs to the current teacher
+  const cls = APP.classes.find(c => c.id === classId && c.teacher_id === APP.teacherId);
+  if (!cls) {
+    toast('You do not have permission to generate a report for this class','error');
+    return;
+  }
+  
+  setBtn('genRptBtn', true, '<i class="fas fa-spinner fa-spin"></i> Generating…');
   try {
-    const cls=APP.classes.find(c=>c.id===classId);
-    const [stus,cols]=await Promise.all([sbFetch(`students?class_id=eq.${classId}&order=full_name.asc`),loadColsFromDB(classId, term)]);
+    const [stus, cols] = await Promise.all([
+      sbFetch(`students?class_id=eq.${classId}&order=full_name.asc`),
+      loadColsFromDB(classId, term)
+    ]);
     generateReport(cls, stus||[], cols, term, year);
-    try { await sbFetch('reports',{method:'POST',body:JSON.stringify({teacher_id:APP.teacherId,class_id:classId,report_type:'class_summary',title:`${cls?.class_name} — Term ${term} ${year}`,term:term,academic_year:year,report_data:{studentCount:(stus||[]).length,columns:cols.length,generated:new Date().toISOString()}})}); } catch {}
-    createNotification('Report Generated',`Class report for ${cls?.class_name||''} Term ${term} has been generated.`,'success','reports');
-  } catch(e) { toast('Error: '+e.message,'error'); }
-  finally { setBtn('genRptBtn',false,'<i class="fas fa-chart-bar"></i> Generate Report'); }
+    try {
+      await sbFetch('reports', {
+        method: 'POST',
+        body: JSON.stringify({
+          teacher_id: APP.teacherId,
+          class_id: classId,
+          report_type: 'class_summary',
+          title: `${cls?.class_name} — Term ${term} ${year}`,
+          term: term,
+          academic_year: year,
+          report_data: {
+            studentCount: (stus||[]).length,
+            columns: cols.length,
+            generated: new Date().toISOString()
+          }
+        })
+      });
+    } catch {}
+    createNotification('Report Generated', `Class report for ${cls?.class_name||''} Term ${term} has been generated.`, 'success', 'reports');
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    setBtn('genRptBtn', false, '<i class="fas fa-chart-bar"></i> Generate Report');
+  }
 });
 
 function generateReport(cls, students, cols, term, year) {
-  const preview=$i('report-preview');
-  const termLabel=term===1?'I':term===2?'II':'III';
+  const preview = $i('report-preview');
+  const termLabel = term === 1 ? 'I' : term === 2 ? 'II' : 'III';
   
   // ─── SCHOOL NAME FROM SETTINGS ───
   const schoolName = APP.schoolName || APP.teacherData?.school_name || 'G.S APAPEC MURAMBI';
@@ -2731,35 +2754,34 @@ function generateReport(cls, students, cols, term, year) {
   const teacherName = APP.teacherData?.full_name || 'CLASS TEACHER';
   const subject = APP.teacherData?.subject || '';
 
-  const sorted=[...students].sort((a,b)=>a.full_name.localeCompare(b.full_name));
-  const avgs=sorted.map(s=>calcAvg(s,cols));
-  const validAvgs=avgs.filter(v=>v!=null);
-  const classAvg=validAvgs.length?validAvgs.reduce((a,b)=>a+b,0)/validAvgs.length:null;
-  const totalPass=avgs.filter(v=>v!=null&&v>=50).length;
+  const sorted = [...students].sort((a,b) => a.full_name.localeCompare(b.full_name));
+  const avgs = sorted.map(s => calcAvg(s, cols));
+  const validAvgs = avgs.filter(v => v != null);
+  const classAvg = validAvgs.length ? validAvgs.reduce((a,b) => a+b, 0) / validAvgs.length : null;
+  const totalPass = avgs.filter(v => v != null && v >= 50).length;
 
   // ─── TEACHER AVERAGE DATA ───
   const avgDenom = getTeacherAvgDenominator(cls, term);
 
   // Column header: each assessment gets Score + % sub-columns
-  const colHeaders=cols.map(c=>`<th colspan="2" style="background:#dde">${esc(c.column_name)}<br><span style="font-weight:400;font-size:8.5px">Full Marks: ${c.max_score}</span></th>`).join('');
-  const colSubHeaders=cols.map(()=>'<th>Score</th><th>%</th>').join('');
+  const colHeaders = cols.map(c => `<th colspan="2" style="background:#dde">${esc(c.column_name)}<br><span style="font-weight:400;font-size:8.5px">Full Marks: ${c.max_score}</span></th>`).join('');
+  const colSubHeaders = cols.map(() => '<th>Score</th><th>%</th>').join('');
 
   // Student rows with Teacher Avg
-  const bodyRows=sorted.map((s,i)=>{
-    const sc=s.scores||{};
-    let totalRaw=0, totalPossible=0;
-    const colCells=cols.map(col=>{
-      const raw=sc[col.column_name];
-      const pct=raw!=null?(raw/col.max_score*100):null;
-      if (raw!=null) { totalRaw+=raw; totalPossible+=col.max_score; }
-      return `<td style="text-align:center">${raw!=null?raw:''}</td><td style="text-align:center">${pct!=null?pct.toFixed(1)+'%':''}</td>`;
+  const bodyRows = sorted.map((s,i) => {
+    const sc = s.scores || {};
+    let totalRaw = 0, totalPossible = 0;
+    const colCells = cols.map(col => {
+      const raw = sc[col.column_name];
+      const pct = raw != null ? (raw / col.max_score * 100) : null;
+      if (raw != null) { totalRaw += raw; totalPossible += col.max_score; }
+      return `<td style="text-align:center">${raw != null ? raw : ''}</td><td style="text-align:center">${pct != null ? pct.toFixed(1) + '%' : ''}</td>`;
     }).join('');
-    const avg=avgs[i];
-    const g=gradeFromPct(avg);
-    const passColor=avg!=null?(avg>=50?'#006600':'#CC0000'):'#333';
-    const bgStyle=avg!=null&&avg<50?'background:#fff5f5':'';
+    const avg = avgs[i];
+    const g = gradeFromPct(avg);
+    const passColor = avg != null ? (avg >= 50 ? '#006600' : '#CC0000') : '#333';
+    const bgStyle = avg != null && avg < 50 ? 'background:#fff5f5' : '';
     
-    // Teacher Avg display: Z / X
     let teacherAvgDisplay = '—';
     const numerator = getTeacherAvgNumerator(s, term);
     if (avgDenom && numerator != null) {
@@ -2768,29 +2790,33 @@ function generateReport(cls, students, cols, term, year) {
     
     return `<tr style="${bgStyle}">
       <td style="text-align:center;font-weight:600">${i+1}</td>
-      <td style="text-align:left;font-weight:600;padding-left:6px">${esc(s.full_name)}${s.registration_number?`<br><span style="font-size:8px;font-weight:400;color:#666">${esc(s.registration_number)}</span>`:''}</td>
+      <td style="text-align:left;font-weight:600;padding-left:6px">${esc(s.full_name)}${s.registration_number ? `<br><span style="font-size:8px;font-weight:400;color:#666">${esc(s.registration_number)}</span>` : ''}</td>
       ${colCells}
-      <td style="text-align:center;font-weight:700">${totalPossible>0?totalRaw.toFixed(1):'—'}</td>
-      <td style="text-align:center;font-weight:700;color:${scoreColorHex(avg)}">${avg!=null?avg.toFixed(1)+'%':'—'}</td>
-      <td style="text-align:center;font-weight:700;color:var(--acc)">${teacherAvgDisplay}</td>
+      <td style="text-align:center;font-weight:700">${totalPossible > 0 ? totalRaw.toFixed(1) : '—'}</td>
+      <td style="text-align:center;font-weight:700;color:${scoreColorHex(avg)}">${avg != null ? avg.toFixed(1) + '%' : '—'}</td>
+      <td style="text-align:center;font-weight:700;color:#FF6600">${teacherAvgDisplay}</td>
       <td style="text-align:center;font-weight:700">${g.grade}</td>
-      <td style="text-align:center;font-weight:700;color:${passColor}">${avg!=null?(avg>=50?'PASS':'FAIL'):'—'}</td>
+      <td style="text-align:center;font-weight:700;color:${passColor}">${avg != null ? (avg >= 50 ? 'PASS' : 'FAIL') : '—'}</td>
     </tr>`;
   }).join('');
 
-  const totalsColCells=cols.map(col=>{
-    const vals=sorted.map(s=>s.scores?.[col.column_name]).filter(v=>v!=null);
-    const avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
-    return `<td style="text-align:center;font-weight:700;background:#f0f0f0">${avg!=null?avg.toFixed(1):''}</td><td style="background:#f0f0f0"></td>`;
+  const totalsColCells = cols.map(col => {
+    const vals = sorted.map(s => s.scores?.[col.column_name]).filter(v => v != null);
+    const avg = vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+    return `<td style="text-align:center;font-weight:700;background:#f0f0f0">${avg != null ? avg.toFixed(1) : ''}</td><td style="background:#f0f0f0"></td>`;
   }).join('');
 
-  const totalColspan=3+cols.length*2+1; // #, Name, cols*2, Total, %, Teacher Avg, Grade, Remarks
+  const totalColspan = 3 + cols.length * 2 + 1;
 
-  function scoreColorHex(pct){
-    if(pct==null)return'#333';if(pct>=80)return'#006600';if(pct>=70)return'#004499';if(pct>=50)return'#885500';return'#CC0000';
+  function scoreColorHex(pct) {
+    if (pct == null) return '#333';
+    if (pct >= 80) return '#006600';
+    if (pct >= 70) return '#004499';
+    if (pct >= 50) return '#885500';
+    return '#CC0000';
   }
 
-  preview.innerHTML=`<div class="rpt-paper">
+  preview.innerHTML = `<div class="rpt-paper">
     <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
       <tr>
         <td style="width:33%;vertical-align:top;font-size:10px;line-height:1.7">
@@ -2824,13 +2850,13 @@ function generateReport(cls, students, cols, term, year) {
 
     <table style="width:100%;border-collapse:collapse;margin-bottom:7px;font-size:10px">
       <tr>
-        <td style="border:1px solid #999;padding:4px 8px"><strong>CLASS:</strong> ${esc(cls?.class_name||'—')}</td>
-        <td style="border:1px solid #999;padding:4px 8px"><strong>SUBJECT/COMBINATION:</strong> ${esc(subject||'ALL SUBJECTS')}</td>
+        <td style="border:1px solid #999;padding:4px 8px"><strong>CLASS:</strong> ${esc(cls?.class_name || '—')}</td>
+        <td style="border:1px solid #999;padding:4px 8px"><strong>SUBJECT/COMBINATION:</strong> ${esc(subject || 'ALL SUBJECTS')}</td>
         <td style="border:1px solid #999;padding:4px 8px"><strong>TOTAL STUDENTS:</strong> ${students.length}</td>
       </tr>
       <tr>
-        <td style="border:1px solid #999;padding:4px 8px"><strong>PASSED:</strong> ${totalPass} (${students.length>0?Math.round(totalPass/students.length*100):0}%)</td>
-        <td style="border:1px solid #999;padding:4px 8px"><strong>CLASS AVERAGE:</strong> <span style="font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg!=null?classAvg.toFixed(1)+'%':'—'}</span></td>
+        <td style="border:1px solid #999;padding:4px 8px"><strong>PASSED:</strong> ${totalPass} (${students.length > 0 ? Math.round(totalPass / students.length * 100) : 0}%)</td>
+        <td style="border:1px solid #999;padding:4px 8px"><strong>CLASS AVERAGE:</strong> <span style="font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</span></td>
         <td style="border:1px solid #999;padding:4px 8px"><strong>TEACHER:</strong> ${esc(teacherName)}</td>
       </tr>
     </table>
@@ -2850,16 +2876,16 @@ function generateReport(cls, students, cols, term, year) {
         <tr>${colSubHeaders}</tr>
       </thead>
       <tbody>
-        ${bodyRows||`<tr><td colspan="${totalColspan}" style="text-align:center;padding:16px;color:#999">No student data available</td></tr>`}
+        ${bodyRows || `<tr><td colspan="${totalColspan}" style="text-align:center;padding:16px;color:#999">No student data available</td></tr>`}
       </tbody>
       <tfoot>
         <tr style="background:#e8e8e8;font-weight:700">
           <td colspan="2" style="text-align:right;padding:5px 8px;font-weight:700">CLASS AVERAGE →</td>
           ${totalsColCells}
           <td style="text-align:center"></td>
-          <td style="text-align:center;font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg!=null?classAvg.toFixed(1)+'%':'—'}</td>
-          <td style="text-align:center;color:var(--acc)">${avgDenom ? `— / ${avgDenom}` : '—'}</td>
-          <td style="text-align:center">${classAvg!=null?gradeFromPct(classAvg).grade:'—'}</td>
+          <td style="text-align:center;font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</td>
+          <td style="text-align:center;color:#FF6600">${avgDenom ? `— / ${avgDenom}` : '—'}</td>
+          <td style="text-align:center">${classAvg != null ? gradeFromPct(classAvg).grade : '—'}</td>
           <td></td>
         </tr>
       </tfoot>
@@ -2878,7 +2904,7 @@ function generateReport(cls, students, cols, term, year) {
       <div style="border:1px solid #ccc;padding:8px;font-size:9.5px">
         <div style="font-weight:700;text-align:center;background:#eee;margin:-8px -8px 6px;padding:4px">REMARKS</div>
         <p>Performance reviewed for Term ${termLabel}, ${esc(year)}.</p>
-        <p style="margin-top:4px">${totalPass===students.length?'Excellent performance by the whole class. Keep it up!':totalPass>students.length/2?'Good performance. Students who are struggling are encouraged to seek extra support.':'Several students need immediate attention and extra tuition.'}</p>
+        <p style="margin-top:4px">${totalPass === students.length ? 'Excellent performance by the whole class. Keep it up!' : totalPass > students.length / 2 ? 'Good performance. Students who are struggling are encouraged to seek extra support.' : 'Several students need immediate attention and extra tuition.'}</p>
         <p style="margin-top:8px;font-weight:700">NEXT TERM BEGINS ON: _______________</p>
       </div>
       <div style="text-align:center;font-size:9.5px">
@@ -2886,7 +2912,7 @@ function generateReport(cls, students, cols, term, year) {
         <div style="border-bottom:1px solid #333;margin:22px 10px 5px"></div>
         <div style="font-weight:700">${esc(teacherName)}</div>
         <div>CLASS TEACHER</div>
-        <div style="margin-top:4px">DATE: ${new Date().toLocaleDateString('en-RW',{day:'2-digit',month:'2-digit',year:'numeric'})}</div>
+        <div style="margin-top:4px">DATE: ${new Date().toLocaleDateString('en-RW', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
         <div style="width:56px;height:56px;border-radius:50%;border:2.5px solid #003399;display:flex;align-items:center;justify-content:center;margin:8px auto 0;flex-direction:column;padding:3px">
           <div style="font-size:6px;font-weight:700;color:#003399;text-align:center;line-height:1.3">${esc(schoolName)}<br>RUBAVU</div>
         </div>
@@ -2901,162 +2927,252 @@ function generateReport(cls, students, cols, term, year) {
       ★ POWERED BY || BILLAN LABS COMPANY ★ &nbsp;—&nbsp; SMARTCLASS ANALYTICS &nbsp;—&nbsp; Generated: ${new Date().toLocaleString('en-RW')}
     </div>
   </div>`;
-  preview.style.display='block';
-  preview.scrollIntoView({behavior:'smooth'});
-  toast('Report generated — click Print to print','success');
+  preview.style.display = 'block';
+  preview.scrollIntoView({ behavior: 'smooth' });
+  toast('Report generated — click Print to print', 'success');
 }
-$i('printRptBtn').addEventListener('click',()=>{
-  if ($i('report-preview').style.display==='none'||!$i('report-preview').innerHTML.trim()) { toast('Generate a report first','warn'); return; }
+
+$i('printRptBtn').addEventListener('click', () => {
+  if ($i('report-preview').style.display === 'none' || !$i('report-preview').innerHTML.trim()) {
+    toast('Generate a report first', 'warn');
+    return;
+  }
   window.print();
 });
 
 /* ═══════════════════════════════════════════════════════
    BACKUP & RESTORE
 ═══════════════════════════════════════════════════════ */
-$i('exportBkBtn').addEventListener('click',async()=>{
-  $i('exportBkBtn').style.opacity='.6';
+$i('exportBkBtn').addEventListener('click', async () => {
+  $i('exportBkBtn').style.opacity = '.6';
   try {
     await loadClasses();
-    const allStudents=[], allCols={};
+    const allStudents = [], allCols = {};
     const term = APP.currentTerm;
     for (const cls of APP.classes) {
-      const [stus,cols]=await Promise.all([sbFetch(`students?class_id=eq.${cls.id}`),loadColsFromDB(cls.id, term)]);
+      const [stus, cols] = await Promise.all([
+        sbFetch(`students?class_id=eq.${cls.id}`),
+        loadColsFromDB(cls.id, term)
+      ]);
       if (stus) allStudents.push(...stus);
-      allCols[cls.id]=cols;
+      allCols[cls.id] = cols;
     }
-    let groups=[],plans=[],slots=[];
-    try { groups=await sbFetch(`groups?teacher_id=eq.${APP.teacherId}`)||[]; } catch {}
-    try { plans=await sbFetch(`lesson_plans?teacher_id=eq.${APP.teacherId}`)||[]; } catch {}
-    try { slots=await sbFetch(`timetable?teacher_id=eq.${APP.teacherId}`)||[]; } catch {}
-    const data={version:'3.0',term:term,teacher:{id:APP.teacherId,...APP.teacherData, schoolName: APP.schoolName},classes:APP.classes,students:allStudents,assessment_columns:allCols,groups,lesson_plans:plans,timetable:slots,exportDate:new Date().toISOString()};
-    dlBlob(JSON.stringify(data,null,2),'application/json',`smartclass_backup_term${term}_${new Date().toISOString().split('T')[0]}.json`);
-    try { await sbFetch('backup_logs',{method:'POST',body:JSON.stringify({teacher_id:APP.teacherId,backup_type:'manual_export',file_name:`smartclass_backup_term${term}_${new Date().toISOString().split('T')[0]}.json`,record_counts:{classes:APP.classes.length,students:allStudents.length},status:'success'})}); } catch {}
-    toast(`Backup downloaded: ${APP.classes.length} classes, ${allStudents.length} students (Term ${term})`,'success');
-  } catch(e){toast('Backup failed: '+e.message,'error');}
-  finally{$i('exportBkBtn').style.opacity='1';}
+    let groups = [], plans = [], slots = [];
+    try { groups = await sbFetch(`groups?teacher_id=eq.${APP.teacherId}`) || []; } catch {}
+    try { plans = await sbFetch(`lesson_plans?teacher_id=eq.${APP.teacherId}`) || []; } catch {}
+    try { slots = await sbFetch(`timetable?teacher_id=eq.${APP.teacherId}`) || []; } catch {}
+    const data = {
+      version: '3.0',
+      term: term,
+      teacher: { id: APP.teacherId, ...APP.teacherData, schoolName: APP.schoolName },
+      classes: APP.classes,
+      students: allStudents,
+      assessment_columns: allCols,
+      groups,
+      lesson_plans: plans,
+      timetable: slots,
+      exportDate: new Date().toISOString()
+    };
+    dlBlob(JSON.stringify(data, null, 2), 'application/json', `smartclass_backup_term${term}_${new Date().toISOString().split('T')[0]}.json`);
+    try {
+      await sbFetch('backup_logs', {
+        method: 'POST',
+        body: JSON.stringify({
+          teacher_id: APP.teacherId,
+          backup_type: 'manual_export',
+          file_name: `smartclass_backup_term${term}_${new Date().toISOString().split('T')[0]}.json`,
+          record_counts: { classes: APP.classes.length, students: allStudents.length },
+          status: 'success'
+        })
+      });
+    } catch {}
+    toast(`Backup downloaded: ${APP.classes.length} classes, ${allStudents.length} students (Term ${term})`, 'success');
+  } catch (e) { toast('Backup failed: ' + e.message, 'error'); }
+  finally { $i('exportBkBtn').style.opacity = '1'; }
 });
 
-$i('exportXlsBtn').addEventListener('click',async()=>{
+$i('exportXlsBtn').addEventListener('click', async () => {
   try {
     await loadClasses();
-    if (!APP.classes.length) { toast('No data to export','warn'); return; }
-    const wb=XLSX.utils.book_new();
+    if (!APP.classes.length) { toast('No data to export', 'warn'); return; }
+    const wb = XLSX.utils.book_new();
     const term = APP.currentTerm;
     for (const cls of APP.classes) {
-      const [stus,cols]=await Promise.all([sbFetch(`students?class_id=eq.${cls.id}&order=full_name.asc`),loadColsFromDB(cls.id, term)]);
-      if (!stus||!stus.length) continue;
+      const [stus, cols] = await Promise.all([
+        sbFetch(`students?class_id=eq.${cls.id}&order=full_name.asc`),
+        loadColsFromDB(cls.id, term)
+      ]);
+      if (!stus || !stus.length) continue;
       const avgDenom = getTeacherAvgDenominator(cls, term);
-      const header=['#','Student Name','Reg. Number',...cols.map(c=>`${c.column_name} /${c.max_score}`),'Teacher Avg','Average %','Grade','Result','Term'];
-      const rows=stus.map((s,i)=>{
-        const avg=calcAvg(s,cols); const g=gradeFromPct(avg);
+      const header = ['#', 'Student Name', 'Reg. Number', ...cols.map(c => `${c.column_name} /${c.max_score}`), 'Teacher Avg', 'Average %', 'Grade', 'Result', 'Term'];
+      const rows = stus.map((s, i) => {
+        const avg = calcAvg(s, cols);
+        const g = gradeFromPct(avg);
         let teacherAvg = '';
         const numerator = getTeacherAvgNumerator(s, term);
         if (avgDenom && numerator != null) {
           teacherAvg = `${numerator.toFixed(1)} / ${avgDenom}`;
         }
-        return [i+1,s.full_name,s.registration_number||'',...cols.map(c=>s.scores?.[c.column_name]??''),teacherAvg,avg!=null?avg.toFixed(1):'',g.grade,avg!=null?(avg>=50?'PASS':'FAIL'):'',term];
+        return [i + 1, s.full_name, s.registration_number || '', ...cols.map(c => s.scores?.[c.column_name] ?? ''), teacherAvg, avg != null ? avg.toFixed(1) : '', g.grade, avg != null ? (avg >= 50 ? 'PASS' : 'FAIL') : '', term];
       });
-      const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
-      XLSX.utils.book_append_sheet(wb,ws,cls.class_name.slice(0,31)+`_T${term}`);
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      XLSX.utils.book_append_sheet(wb, ws, cls.class_name.slice(0, 31) + `_T${term}`);
     }
-    XLSX.writeFile(wb,`smartclass_export_term${term}_${new Date().toISOString().split('T')[0]}.xlsx`);
-    toast('Excel exported','success');
-  } catch(e){toast('Export failed: '+e.message,'error');}
+    XLSX.writeFile(wb, `smartclass_export_term${term}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast('Excel exported', 'success');
+  } catch (e) { toast('Export failed: ' + e.message, 'error'); }
 });
 
-$i('importBkBtn').addEventListener('click',()=>{
-  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
-  inp.onchange=async e=>{
-    const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async ev=>{
+$i('importBkBtn').addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json';
+  inp.onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async ev => {
       try {
-        const data=JSON.parse(ev.target.result);
-        if (!data.classes||!data.students) { toast('Invalid backup file','error'); return; }
-        confirm2('Restore Backup',`This will add ${data.classes.length} classes and ${data.students.length} students for Term ${data.term||1}.`,async()=>{
-          let cc=0,sc=0;
+        const data = JSON.parse(ev.target.result);
+        if (!data.classes || !data.students) { toast('Invalid backup file', 'error'); return; }
+        confirm2('Restore Backup', `This will add ${data.classes.length} classes and ${data.students.length} students for Term ${data.term || 1}.`, async () => {
+          let cc = 0, sc = 0;
           for (const cls of data.classes) {
             try {
-              const created=await sbFetch('classes',{method:'POST',body:JSON.stringify({...cls,id:undefined,teacher_id:APP.teacherId})});
-              const newId=created[0]?.id;
+              const created = await sbFetch('classes', {
+                method: 'POST',
+                body: JSON.stringify({ ...cls, id: undefined, teacher_id: APP.teacherId })
+              });
+              const newId = created[0]?.id;
               if (newId) {
-                const clsCols=data.assessment_columns?.[cls.id]||[];
-                for (const col of clsCols) { try { await sbFetch('assessment_columns',{method:'POST',body:JSON.stringify({class_id:newId,column_name:col.column_name,max_score:col.max_score,column_order:col.column_order||0,term:data.term||1})}); } catch {} }
-                const clsStus=data.students.filter(s=>s.class_id===cls.id);
-                for (const stu of clsStus) { try { await sbFetch('students',{method:'POST',body:JSON.stringify({full_name:stu.full_name,class_id:newId,scores:stu.scores||{},registration_number:stu.registration_number||null})}); sc++; } catch {} }
+                const clsCols = data.assessment_columns?.[cls.id] || [];
+                for (const col of clsCols) {
+                  try {
+                    await sbFetch('assessment_columns', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        class_id: newId,
+                        column_name: col.column_name,
+                        max_score: col.max_score,
+                        column_order: col.column_order || 0,
+                        term: data.term || 1
+                      })
+                    });
+                  } catch {}
+                }
+                const clsStus = data.students.filter(s => s.class_id === cls.id);
+                for (const stu of clsStus) {
+                  try {
+                    await sbFetch('students', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        full_name: stu.full_name,
+                        class_id: newId,
+                        scores: stu.scores || {},
+                        registration_number: stu.registration_number || null
+                      })
+                    });
+                    sc++;
+                  } catch {}
+                }
                 cc++;
               }
             } catch {}
           }
           await renderClasses();
-          toast(`Restored ${cc} classes and ${sc} students for Term ${data.term||1}`,'success');
-          try { await sbFetch('backup_logs',{method:'POST',body:JSON.stringify({teacher_id:APP.teacherId,backup_type:'restore',record_counts:{classes:cc,students:sc},status:'success'})}); } catch {}
-        },'Restore');
-      } catch{toast('Failed to read backup file','error');}
+          toast(`Restored ${cc} classes and ${sc} students for Term ${data.term || 1}`, 'success');
+          try {
+            await sbFetch('backup_logs', {
+              method: 'POST',
+              body: JSON.stringify({
+                teacher_id: APP.teacherId,
+                backup_type: 'restore',
+                record_counts: { classes: cc, students: sc },
+                status: 'success'
+              })
+            });
+          } catch {}
+        }, 'Restore');
+      } catch { toast('Failed to read backup file', 'error'); }
     };
     reader.readAsText(file);
   };
   inp.click();
 });
 
-$i('clearDataBtn').addEventListener('click',()=>confirm2('Clear ALL Data','This will permanently delete ALL classes and student records. This CANNOT be undone.',async()=>{
+$i('clearDataBtn').addEventListener('click', () => confirm2('Clear ALL Data', 'This will permanently delete ALL classes and student records. This CANNOT be undone.', async () => {
   try {
     for (const cls of APP.classes) {
-      await sbFetch(`students?class_id=eq.${cls.id}`,{method:'DELETE',headers:{'Prefer':''}});
-      await sbFetch(`assessment_columns?class_id=eq.${cls.id}`,{method:'DELETE',headers:{'Prefer':''}});
-      await sbFetch(`classes?id=eq.${cls.id}`,{method:'DELETE',headers:{'Prefer':''}});
+      await sbFetch(`students?class_id=eq.${cls.id}`, { method: 'DELETE', headers: { 'Prefer': '' } });
+      await sbFetch(`assessment_columns?class_id=eq.${cls.id}`, { method: 'DELETE', headers: { 'Prefer': '' } });
+      await sbFetch(`classes?id=eq.${cls.id}`, { method: 'DELETE', headers: { 'Prefer': '' } });
     }
-    APP.classes=[]; APP.allStudents=[]; APP.dispStudents=[]; APP.currentClassId=null;
-    await renderClasses(); toast('All data cleared','warn');
-  } catch(e){toast('Error: '+e.message,'error');}
-},'CLEAR ALL'));
+    APP.classes = [];
+    APP.allStudents = [];
+    APP.dispStudents = [];
+    APP.currentClassId = null;
+    await renderClasses();
+    toast('All data cleared', 'warn');
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}, 'CLEAR ALL'));
 
 /* ═══════════════════════════════════════════════════════
    SETTINGS
 ═══════════════════════════════════════════════════════ */
 function loadSettings() {
-  $i('set-name').value=APP.teacherData?.full_name||localStorage.getItem('sc_tname')||'';
-  $i('set-email').value=localStorage.getItem('sc_email')||'';
-  $i('set-school').value=APP.teacherData?.school_name||APP.schoolName||'';
-  $i('set-subject').value=APP.teacherData?.subject||'';
-  $i('darkToggle').checked=APP.theme==='dark';
+  $i('set-name').value = APP.teacherData?.full_name || localStorage.getItem('sc_tname') || '';
+  $i('set-email').value = localStorage.getItem('sc_email') || '';
+  $i('set-school').value = APP.teacherData?.school_name || APP.schoolName || '';
+  $i('set-subject').value = APP.teacherData?.subject || '';
+  $i('darkToggle').checked = APP.theme === 'dark';
 }
-$i('saveProfileBtn').addEventListener('click',async()=>{
-  const name=$i('set-name').value.trim(), school=$i('set-school').value.trim(), subject=$i('set-subject').value.trim();
-  localStorage.setItem('sc_tname',name);
+$i('saveProfileBtn').addEventListener('click', async () => {
+  const name = $i('set-name').value.trim(), school = $i('set-school').value.trim(), subject = $i('set-subject').value.trim();
+  localStorage.setItem('sc_tname', name);
   APP.schoolName = school;
-  updateSbProfile(name,localStorage.getItem('sc_email')||'');
-  setBtn('saveProfileBtn',true,'Saving…');
+  updateSbProfile(name, localStorage.getItem('sc_email') || '');
+  setBtn('saveProfileBtn', true, 'Saving…');
   try {
-    await sbFetch(`teachers?id=eq.${APP.teacherId}`,{method:'PATCH',body:JSON.stringify({full_name:name,school_name:school,subject,updated_at:new Date().toISOString()})});
+    await sbFetch(`teachers?id=eq.${APP.teacherId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ full_name: name, school_name: school, subject, updated_at: new Date().toISOString() })
+    });
     try {
-      await sbFetch(`user_settings?teacher_id=eq.${APP.teacherId}`,{method:'PATCH',body:JSON.stringify({theme:APP.theme,school_name:school,updated_at:new Date().toISOString()})});
+      await sbFetch(`user_settings?teacher_id=eq.${APP.teacherId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ theme: APP.theme, school_name: school, updated_at: new Date().toISOString() })
+      });
     } catch {
-      try { await sbFetch('user_settings',{method:'POST',body:JSON.stringify({teacher_id:APP.teacherId,theme:APP.theme,school_name:school})}); } catch {}
+      try {
+        await sbFetch('user_settings', {
+          method: 'POST',
+          body: JSON.stringify({ teacher_id: APP.teacherId, theme: APP.theme, school_name: school })
+        });
+      } catch {}
     }
-    if (APP.teacherData) { APP.teacherData.full_name=name; APP.teacherData.school_name=school; APP.teacherData.subject=subject; }
-    toast('Profile saved','success');
-  } catch(e) { toast('Error saving: '+e.message,'error'); }
-  finally { setBtn('saveProfileBtn',false,'<i class="fas fa-check"></i> Save Changes'); }
+    if (APP.teacherData) { APP.teacherData.full_name = name;
+      APP.teacherData.school_name = school;
+      APP.teacherData.subject = subject; }
+    toast('Profile saved', 'success');
+  } catch (e) { toast('Error saving: ' + e.message, 'error'); } finally { setBtn('saveProfileBtn', false, '<i class="fas fa-check"></i> Save Changes'); }
 });
 
 /* ═══════════════════════════════════════════════════════
    HELP
 ═══════════════════════════════════════════════════════ */
-const FAQS=[
-  {q:'How do I add students?',a:'Select a class and term, then click "Add Student" in the toolbar. Enter the student\'s full name.'},
-  {q:'How does the term system work?',a:'The Rwandan academic year has 3 terms. Use the "Term" dropdown to switch between terms. Each term has its own assessment columns and marks. Student lists remain across all terms.'},
-  {q:'How do I set the Teacher Average?',a:'Click "Set Average" in the toolbar. Enter a total marks value (X). The system scales each student\'s current average percentage to that total using the formula: Z = Y × (X/100). This is term-specific.'},
-  {q:'How do I add assessment columns?',a:'Select a class and term, then click "Add Assessment" in the toolbar. Enter the column name and total marks. Columns are term-specific.'},
-  {q:'How do I generate a class report?',a:'Go to Reports, select the class, term, and academic year. The report includes the school name from your settings, your name, subject, and Teacher Avg column.'},
-  {q:'How do I change my school name?',a:'Go to Settings → Profile & School Information. Enter your school name and click Save Changes. This will appear on all reports.'},
-  {q:'What does the Risk Analysis page do?',a:'It analyses each student\'s current average and score trends for the selected term to flag High Risk (below 40%), At Risk, or On Track students.'},
-  {q:'How is my data secured?',a:'All data is stored in Supabase with Row-Level Security (RLS). Each teacher can only see and modify their own data. Your session is isolated from other teachers.'},
-  {q:'What should I do if login fails?',a:'Check your email and password. If you just created your account, verify your email address first.'},
-  {q:'What is the "Set Average" button?',a:'This allows you to set a teacher-defined average for all students in the class for the current term. Enter a total marks value (X), and the system scales each student\'s current average percentage to that total.'},
+const FAQS = [
+  { q: 'How do I add students?', a: 'Select a class and term, then click "Add Student" in the toolbar. Enter the student\'s full name.' },
+  { q: 'How does the term system work?', a: 'The Rwandan academic year has 3 terms. Use the "Term" dropdown to switch between terms. Each term has its own assessment columns and marks. Student lists remain across all terms.' },
+  { q: 'How do I set the Teacher Average?', a: 'Click "Set Average" in the toolbar. Enter a total marks value (X). The system scales each student\'s current average percentage to that total using the formula: Z = Y × (X/100). This is term-specific.' },
+  { q: 'How do I add assessment columns?', a: 'Select a class and term, then click "Add Assessment" in the toolbar. Enter the column name and total marks. Columns are term-specific.' },
+  { q: 'How do I generate a class report?', a: 'Go to Reports, select the class, term, and academic year. The report includes the school name from your settings, your name, subject, and Teacher Avg column.' },
+  { q: 'How do I change my school name?', a: 'Go to Settings → Profile & School Information. Enter your school name and click Save Changes. This will appear on all reports.' },
+  { q: 'What does the Risk Analysis page do?', a: 'It analyses each student\'s current average and score trends for the selected term to flag High Risk (below 40%), At Risk, or On Track students.' },
+  { q: 'How is my data secured?', a: 'All data is stored in Supabase with Row-Level Security (RLS). Each teacher can only see and modify their own data. Your session is isolated from other teachers.' },
+  { q: 'What should I do if login fails?', a: 'Check your email and password. If you just created your account, verify your email address first.' },
 ];
 function renderHelp() {
-  $i('faq-list').innerHTML=FAQS.map((f,i)=>`
+  $i('faq-list').innerHTML = FAQS.map((f, i) => `
     <div class="faq-item" id="faq${i}">
       <div class="faq-q" onclick="toggleFaq('faq${i}')">${esc(f.q)} <i class="fas fa-chevron-down"></i></div>
       <div class="faq-a">${esc(f.a)}</div>
@@ -3067,57 +3183,60 @@ window.toggleFaq = id => document.getElementById(id)?.classList.toggle('open');
 /* ═══════════════════════════════════════════════════════
    SET ALL MARKS FOR A COLUMN
 ═══════════════════════════════════════════════════════ */
-$i('setAllMarksBtn').addEventListener('click',()=>{
-  if (!APP.currentClassId){toast('Select a class first','warn');return;}
-  if (!APP.currentCols.length){toast('Add an assessment column first for this term','warn');return;}
-  if (!APP.allStudents.length){toast('No students in this class','warn');return;}
-  $i('m-sam-col').innerHTML=APP.currentCols.map(c=>`<option value="${escA(c.column_name)}" data-max="${c.max_score}">${esc(c.column_name)} (/${c.max_score})</option>`).join('');
-  $i('m-sam-score').value='';
-  $i('m-sam-hint').textContent=`Score must be between 0 and the column's full marks. (Term ${APP.currentTerm})`;
-  $i('m-sam-col').onchange=()=>{
-    const sel=$i('m-sam-col');
-    const opt=sel.options[sel.selectedIndex];
-    $i('m-sam-hint').textContent=`Score must be between 0 and ${opt.dataset.max}. (Term ${APP.currentTerm})`;
-    $i('m-sam-score').max=opt.dataset.max;
+$i('setAllMarksBtn').addEventListener('click', () => {
+  if (!APP.currentClassId) { toast('Select a class first', 'warn'); return; }
+  if (!APP.currentCols.length) { toast('Add an assessment column first for this term', 'warn'); return; }
+  if (!APP.allStudents.length) { toast('No students in this class', 'warn'); return; }
+  $i('m-sam-col').innerHTML = APP.currentCols.map(c => `<option value="${escA(c.column_name)}" data-max="${c.max_score}">${esc(c.column_name)} (/${c.max_score})</option>`).join('');
+  $i('m-sam-score').value = '';
+  $i('m-sam-hint').textContent = `Score must be between 0 and the column's full marks. (Term ${APP.currentTerm})`;
+  $i('m-sam-col').onchange = () => {
+    const sel = $i('m-sam-col');
+    const opt = sel.options[sel.selectedIndex];
+    $i('m-sam-hint').textContent = `Score must be between 0 and ${opt.dataset.max}. (Term ${APP.currentTerm})`;
+    $i('m-sam-score').max = opt.dataset.max;
   };
   $i('m-sam-col').onchange();
   openModal('m-setAllMarks');
 });
 
-$i('saveAllMarksBtn').addEventListener('click',async()=>{
-  const colName=$i('m-sam-col').value;
-  const scoreVal=$i('m-sam-score').value.trim();
-  const col=APP.currentCols.find(c=>c.column_name===colName);
-  if (!col){toast('Select a valid column','warn');return;}
-  if (scoreVal===''){toast('Enter a score to apply','warn');return;}
-  const score=parseFloat(scoreVal);
-  if (isNaN(score)||score<0||score>col.max_score){toast(`Score must be 0–${col.max_score}`,'warn');return;}
-  setBtn('saveAllMarksBtn',true,`Applying to ${APP.allStudents.length} students for Term ${APP.currentTerm}…`);
-  let applied=0,errors=0;
-  for (const stu of APP.allStudents){
+$i('saveAllMarksBtn').addEventListener('click', async () => {
+  const colName = $i('m-sam-col').value;
+  const scoreVal = $i('m-sam-score').value.trim();
+  const col = APP.currentCols.find(c => c.column_name === colName);
+  if (!col) { toast('Select a valid column', 'warn'); return; }
+  if (scoreVal === '') { toast('Enter a score to apply', 'warn'); return; }
+  const score = parseFloat(scoreVal);
+  if (isNaN(score) || score < 0 || score > col.max_score) { toast(`Score must be 0–${col.max_score}`, 'warn'); return; }
+  setBtn('saveAllMarksBtn', true, `Applying to ${APP.allStudents.length} students for Term ${APP.currentTerm}…`);
+  let applied = 0, errors = 0;
+  for (const stu of APP.allStudents) {
     try {
-      const newScores={...(stu.scores||{}),[colName]:score};
-      await sbFetch(`students?id=eq.${stu.id}`,{method:'PATCH',body:JSON.stringify({scores:newScores})});
-      stu.scores=newScores; applied++;
+      const newScores = { ...(stu.scores || {}), [colName]: score };
+      await sbFetch(`students?id=eq.${stu.id}`, { method: 'PATCH', body: JSON.stringify({ scores: newScores }) });
+      stu.scores = newScores;
+      applied++;
     } catch { errors++; }
   }
-  APP.dispStudents.forEach(s=>{const idx=APP.allStudents.findIndex(a=>a.id===s.id);if(idx>=0)s.scores=APP.allStudents[idx].scores;});
+  APP.dispStudents.forEach(s => { const idx = APP.allStudents.findIndex(a => a.id === s.id); if (idx >= 0) s.scores = APP.allStudents[idx].scores; });
   closeModal('m-setAllMarks');
-  renderStudents(); updateClassStats();
-  toast(`Applied ${score}/${col.max_score} to ${applied} students for Term ${APP.currentTerm}${errors?` (${errors} failed)`:''}`,applied>0?'success':'warn');
-  setBtn('saveAllMarksBtn',false,'<i class="fas fa-check"></i> Apply to All Students');
+  renderStudents();
+  updateClassStats();
+  toast(`Applied ${score}/${col.max_score} to ${applied} students for Term ${APP.currentTerm}${errors ? ` (${errors} failed)` : ''}`, applied > 0 ? 'success' : 'warn');
+  setBtn('saveAllMarksBtn', false, '<i class="fas fa-check"></i> Apply to All Students');
 });
 
 /* ═══════════════════════════════════════════════════════
    POPULATE CLASS SELECTS
 ═══════════════════════════════════════════════════════ */
 function populateClassSelects() {
-  ['m-grpClass','m-planClass','m-slotClass','rpt-class','pred-class'].forEach(sid=>{
-    const el=document.getElementById(sid); if(!el) return;
-    el.innerHTML=APP.classes.map(c=>`<option value="${c.id}">${esc(c.class_name)}</option>`).join('');
+  ['m-grpClass', 'm-planClass', 'm-slotClass', 'pred-class'].forEach(sid => {
+    const el = document.getElementById(sid);
+    if (!el) return;
+    el.innerHTML = APP.classes.map(c => `<option value="${c.id}">${esc(c.class_name)}</option>`).join('');
   });
-  const cc=$i('compete-class');
-  if(cc) cc.innerHTML='<option value="">All Classes</option>'+APP.classes.map(c=>`<option value="${c.id}">${esc(c.class_name)}</option>`).join('');
+  const cc = $i('compete-class');
+  if (cc) cc.innerHTML = '<option value="">All Classes</option>' + APP.classes.map(c => `<option value="${c.id}">${esc(c.class_name)}</option>`).join('');
 }
 </script>
 </body>
