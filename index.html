@@ -2830,11 +2830,12 @@ $i('genRptBtn').addEventListener('click',async()=>{
   
   setBtn('genRptBtn', true, '<i class="fas fa-spinner fa-spin"></i> Generating…');
   try {
-    const [stus, cols] = await Promise.all([
+    const [stus, cols, teacherOverview] = await Promise.all([
       sbFetch(`students?class_id=eq.${classId}&order=full_name.asc`),
-      loadColsFromDB(classId, term)
+      loadColsFromDB(classId, term),
+      computeTeacherOverallAverage(term).catch(() => ({ overall: null, totalStu: 0, best: null, classCount: null }))
     ]);
-    generateReport(cls, stus||[], cols, term, year);
+    generateReport(cls, stus||[], cols, term, year, teacherOverview);
     try {
       await sbFetch('reports', {
         method: 'POST',
@@ -2861,7 +2862,7 @@ $i('genRptBtn').addEventListener('click',async()=>{
   }
 });
 
-function generateReport(cls, students, cols, term, year) {
+function generateReport(cls, students, cols, term, year, teacherOverview) {
   const preview = $i('report-preview');
   const termLabel = term === 1 ? 'I' : term === 2 ? 'II' : 'III';
   
@@ -2874,9 +2875,19 @@ function generateReport(cls, students, cols, term, year) {
   const districtLabel = district.toUpperCase() + ' DISTRICT';
   const districtShort = district.toUpperCase();
   
-  // ─── TEACHER NAME & SUBJECT ───
+  // ─── TEACHER NAME, SUBJECT & ROLE ───
   const teacherName = APP.teacherData?.full_name || 'CLASS TEACHER';
   const subject = APP.teacherData?.subject || '';
+  const roleLabel = subject ? `${subject} Teacher` : 'Class Teacher';
+
+  // ─── TEACHER'S OVERALL AVERAGE (across all classes, this term) ───
+  const teacherOverallAvg = teacherOverview?.overall ?? null;
+  const teacherOverallClasses = teacherOverview?.classCount ?? null;
+
+  // ─── GENERATION DATE & TIME (for footer) ───
+  const genNow = new Date();
+  const genDateStr = genNow.toLocaleDateString('en-RW', { day: '2-digit', month: 'long', year: 'numeric' });
+  const genTimeStr = genNow.toLocaleTimeString('en-RW', { hour: '2-digit', minute: '2-digit' });
 
   const sorted = [...students].sort((a,b) => a.full_name.localeCompare(b.full_name));
   const avgs = sorted.map(s => calcAvg(s, cols));
@@ -2983,6 +2994,10 @@ function generateReport(cls, students, cols, term, year) {
         <td style="border:1px solid #999;padding:4px 8px"><strong>CLASS AVERAGE:</strong> <span style="font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</span></td>
         <td style="border:1px solid #999;padding:4px 8px"><strong>TEACHER:</strong> ${esc(teacherName)}</td>
       </tr>
+      <tr>
+        <td style="border:1px solid #999;padding:4px 8px" colspan="2"><strong>TEACHER'S OVERALL AVERAGE:</strong> <span style="font-weight:700;color:${scoreColorHex(teacherOverallAvg)}">${teacherOverallAvg != null ? teacherOverallAvg.toFixed(1) + '%' : '—'}</span> <span style="font-size:8.5px;color:#666">(across ${teacherOverallClasses ?? 0} class${teacherOverallClasses === 1 ? '' : 'es'}, Term ${termLabel})</span></td>
+        <td style="border:1px solid #999;padding:4px 8px"><strong>ROLE:</strong> ${esc(roleLabel)}</td>
+      </tr>
     </table>
 
     <table class="rpt-tbl">
@@ -3047,8 +3062,14 @@ function generateReport(cls, students, cols, term, year) {
       <strong>GRADING SYSTEM:</strong> &nbsp;
       A [80 – 100%] &nbsp;|&nbsp; B [70 – 79%] &nbsp;|&nbsp; C [50 – 69%] &nbsp;|&nbsp; D [40 – 49%] &nbsp;|&nbsp; E [0 – 39%]
     </div>
-    <div style="margin-top:5px;text-align:center;font-size:9px;color:#555;border-top:1px solid #ddd;padding-top:5px">
-      ★ POWERED BY || BILLAN LABS COMPANY ★ &nbsp;—&nbsp; SMARTCLASS ANALYTICS &nbsp;—&nbsp; Generated: ${new Date().toLocaleString('en-RW')}
+    <div style="margin-top:5px;text-align:center;font-size:9.5px;color:#333;border-top:1px solid #ddd;padding-top:6px;font-weight:600">
+      Prepared by: ${esc(roleLabel)} ${esc(teacherName)}
+    </div>
+    <div style="margin-top:2px;text-align:center;font-size:9px;color:#555;padding-top:2px">
+      Date Generated: ${esc(genDateStr)} &nbsp;|&nbsp; Time: ${esc(genTimeStr)}
+    </div>
+    <div style="margin-top:4px;text-align:center;font-size:8.5px;color:#888;border-top:1px solid #eee;padding-top:4px">
+      ★ POWERED BY || BILLAN LABS COMPANY ★ &nbsp;—&nbsp; SMARTCLASS ANALYTICS
     </div>
   </div>`;
   preview.style.display = 'block';
@@ -3257,30 +3278,34 @@ function loadSettings() {
 }
 $i('set-province')?.addEventListener('change', e => populateDistricts(e.target.value, ''));
 
+async function computeTeacherOverallAverage(term) {
+  await loadClasses();
+  let totalStu = 0, best = null;
+  const classAvgs = [];
+  for (const cls of APP.classes) {
+    try {
+      const [stus, cols] = await Promise.all([sbFetch(`students?class_id=eq.${cls.id}`), loadColsFromDB(cls.id, term)]);
+      const s = stus || [];
+      const avgs = s.map(st => calcAvg(st, cols)).filter(v => v != null);
+      const avg = avgs.length ? avgs.reduce((a,b)=>a+b,0)/avgs.length : null;
+      totalStu += s.length;
+      if (avg != null) {
+        classAvgs.push(avg);
+        if (!best || avg > best.avg) best = { name: cls.class_name, avg };
+      }
+    } catch {}
+  }
+  const overall = classAvgs.length ? classAvgs.reduce((a,b)=>a+b,0)/classAvgs.length : null;
+  return { overall, totalStu, best, classCount: APP.classes.length };
+}
+
 async function renderSettingsOverview() {
   const badge = $i('set-ov-badge');
   if (badge) badge.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Calculating…';
   $i('set-ov-term').textContent = APP.currentTerm;
   try {
-    await loadClasses();
-    const term = APP.currentTerm;
-    let totalStu = 0, best = null;
-    const classAvgs = [];
-    for (const cls of APP.classes) {
-      try {
-        const [stus, cols] = await Promise.all([sbFetch(`students?class_id=eq.${cls.id}`), loadColsFromDB(cls.id, term)]);
-        const s = stus || [];
-        const avgs = s.map(st => calcAvg(st, cols)).filter(v => v != null);
-        const avg = avgs.length ? avgs.reduce((a,b)=>a+b,0)/avgs.length : null;
-        totalStu += s.length;
-        if (avg != null) {
-          classAvgs.push(avg);
-          if (!best || avg > best.avg) best = { name: cls.class_name, avg };
-        }
-      } catch {}
-    }
-    const overall = classAvgs.length ? classAvgs.reduce((a,b)=>a+b,0)/classAvgs.length : null;
-    $i('set-ov-classes').textContent = APP.classes.length;
+    const { overall, totalStu, best, classCount } = await computeTeacherOverallAverage(APP.currentTerm);
+    $i('set-ov-classes').textContent = classCount;
     $i('set-ov-students').textContent = totalStu;
     const avgEl = $i('set-ov-avg');
     avgEl.textContent = overall != null ? overall.toFixed(1) + '%' : '—';
@@ -3288,8 +3313,8 @@ async function renderSettingsOverview() {
     $i('set-ov-top').textContent = best ? best.name : '—';
     $i('set-ov-top-sub').textContent = best ? `${best.avg.toFixed(1)}% average` : 'No data yet';
     if (badge) {
-      badge.innerHTML = APP.classes.length
-        ? `<i class="fas fa-check-circle" style="color:var(--green)"></i> Live · ${APP.classes.length} class${APP.classes.length===1?'':'es'}`
+      badge.innerHTML = classCount
+        ? `<i class="fas fa-check-circle" style="color:var(--green)"></i> Live · ${classCount} class${classCount===1?'':'es'}`
         : '<i class="fas fa-info-circle"></i> No classes yet';
     }
   } catch (e) {
