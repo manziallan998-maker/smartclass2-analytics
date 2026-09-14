@@ -2897,6 +2897,12 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
 
   // ─── TEACHER AVERAGE DATA ───
   const avgDenom = getTeacherAvgDenominator(cls, term);
+  const teacherAvgNumerators = sorted
+    .map(s => getTeacherAvgNumerator(s, term))
+    .filter(v => v != null);
+  const teacherAvgClassAvg = teacherAvgNumerators.length
+    ? teacherAvgNumerators.reduce((a, b) => a + b, 0) / teacherAvgNumerators.length
+    : null;
 
   // Column header: each assessment gets Score + % sub-columns
   const colHeaders = cols.map(c => `<th colspan="2" style="background:#dde">${esc(c.column_name)}<br><span style="font-weight:400;font-size:8.5px">Full Marks: ${c.max_score}</span></th>`).join('');
@@ -3023,7 +3029,7 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
           ${totalsColCells}
           <td style="text-align:center"></td>
           <td style="text-align:center;font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</td>
-          <td style="text-align:center;color:#FF6600">${avgDenom ? `— / ${avgDenom}` : '—'}</td>
+          <td style="text-align:center;font-weight:700;color:#FF6600">${avgDenom && teacherAvgClassAvg != null ? `${teacherAvgClassAvg.toFixed(1)} / ${avgDenom}` : '—'}</td>
           <td style="text-align:center">${classAvg != null ? gradeFromPct(classAvg).grade : '—'}</td>
           <td></td>
         </tr>
