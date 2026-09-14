@@ -2911,11 +2911,9 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
   // Student rows with Teacher Avg
   const bodyRows = sorted.map((s,i) => {
     const sc = s.scores || {};
-    let totalRaw = 0, totalPossible = 0;
     const colCells = cols.map(col => {
       const raw = sc[col.column_name];
       const pct = raw != null ? (raw / col.max_score * 100) : null;
-      if (raw != null) { totalRaw += raw; totalPossible += col.max_score; }
       return `<td style="text-align:center">${raw != null ? raw : ''}</td><td style="text-align:center">${pct != null ? pct.toFixed(1) + '%' : ''}</td>`;
     }).join('');
     const avg = avgs[i];
@@ -2933,7 +2931,6 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
       <td style="text-align:center;font-weight:600">${i+1}</td>
       <td style="text-align:left;font-weight:600;padding-left:6px">${esc(s.full_name)}${s.registration_number ? `<br><span style="font-size:8px;font-weight:400;color:#666">${esc(s.registration_number)}</span>` : ''}</td>
       ${colCells}
-      <td style="text-align:center;font-weight:700">${totalPossible > 0 ? totalRaw.toFixed(1) : '—'}</td>
       <td style="text-align:center;font-weight:700;color:${scoreColorHex(avg)}">${avg != null ? avg.toFixed(1) + '%' : '—'}</td>
       <td style="text-align:center;font-weight:700;color:#FF6600">${teacherAvgDisplay}</td>
       <td style="text-align:center;font-weight:700">${g.grade}</td>
@@ -2947,7 +2944,7 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
     return `<td style="text-align:center;font-weight:700;background:#f0f0f0">${avg != null ? avg.toFixed(1) : ''}</td><td style="background:#f0f0f0"></td>`;
   }).join('');
 
-  const totalColspan = 3 + cols.length * 2 + 1;
+  const totalColspan = 2 + cols.length * 2 + 4;
 
   function scoreColorHex(pct) {
     if (pct == null) return '#333';
@@ -3012,7 +3009,6 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
           <th rowspan="2" style="text-align:center;width:28px">#</th>
           <th rowspan="2" style="text-align:left;min-width:130px">STUDENT'S NAMES</th>
           ${colHeaders}
-          <th rowspan="2" style="background:#bbc">TOTAL<br>NUMBERS</th>
           <th rowspan="2" style="background:#bbc">%</th>
           <th rowspan="2" style="background:#bbc;min-width:70px">TEACHER<br>AVG</th>
           <th rowspan="2" style="background:#bbc">GRADE</th>
@@ -3027,7 +3023,6 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
         <tr style="background:#e8e8e8;font-weight:700">
           <td colspan="2" style="text-align:right;padding:5px 8px;font-weight:700">CLASS AVERAGE →</td>
           ${totalsColCells}
-          <td style="text-align:center"></td>
           <td style="text-align:center;font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</td>
           <td style="text-align:center;font-weight:700;color:#FF6600">${avgDenom && teacherAvgClassAvg != null ? `${teacherAvgClassAvg.toFixed(1)} / ${avgDenom}` : '—'}</td>
           <td style="text-align:center">${classAvg != null ? gradeFromPct(classAvg).grade : '—'}</td>
