@@ -770,6 +770,10 @@ table.main-tbl tbody tr:hover{background:var(--bg-hover)}
           <div class="opt-grp"><label>Term</label><select id="rpt-term"><option value="1">Term 1</option><option value="2">Term 2</option><option value="3" selected>Term 3</option></select></div>
           <div class="opt-grp"><label>Academic Year</label><input type="text" id="rpt-year" value="2025-2026"></div>
         </div>
+        <div style="display:flex;align-items:center;gap:7px;margin:4px 0 13px">
+          <input type="checkbox" id="rpt-showTeacherAvg" checked style="width:15px;height:15px;cursor:pointer">
+          <label for="rpt-showTeacherAvg" style="font-size:12.5px;color:var(--txt2);cursor:pointer;user-select:none">Show "Teacher Avg" column on the report</label>
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="genRptBtn"><i class="fas fa-chart-bar"></i> Generate Report</button>
           <button class="btn-sec" id="printRptBtn"><i class="fas fa-print"></i> Print</button>
@@ -1287,24 +1291,37 @@ function isValidName(str) {
 /* ═══════════════════════════════════════════════════════
    GRADE / SCORE HELPERS (TERM-AWARE)
 ═══════════════════════════════════════════════════════ */
+// Scores are stored in one flat JSON object per student, shared across every
+// term. Two different terms that happen to reuse the same assessment name
+// (e.g. both called "Test") would otherwise silently overwrite each other's
+// marks. scoreKey() namespaces every NEW score by the column's term so this
+// can never happen again. readScore() checks the namespaced key first and
+// falls back to the old plain key so scores saved before this fix keep
+// working — no bulk data migration needed, and nothing already saved is lost.
+function scoreKey(columnName, term) {
+  return `${columnName}::t${term}`;
+}
+function readScore(scores, columnName, term) {
+  if (!scores) return null;
+  const scoped = scores[scoreKey(columnName, term)];
+  if (scoped != null) return scoped;
+  const legacy = scores[columnName];
+  return legacy != null ? legacy : null;
+}
 function calcAvg(student, columns) {
   if (!columns || !columns.length) return null;
   const scores = student.scores || {};
-  const vals = columns.map(col => {
-    const raw = scores[col.column_name];
-    return raw != null ? (raw / col.max_score * 100) : null;
-  }).filter(v => v != null);
-  if (!vals.length) return null;
-  return vals.reduce((a,b) => a+b, 0) / vals.length;
+  let earned = 0, possible = 0;
+  columns.forEach(col => {
+    const raw = readScore(scores, col.column_name, col.term);
+    if (raw != null && col.max_score) { earned += raw; possible += col.max_score; }
+  });
+  if (possible === 0) return null;
+  return (earned / possible) * 100;
 }
 
 function getTermSuffix(term) {
   return term === 1 ? '_term1' : term === 2 ? '_term2' : '_term3';
-}
-
-function getTeacherAvgNumerator(student, term) {
-  const suffix = getTermSuffix(term);
-  return student['teacher_avg_numerator' + suffix] || null;
 }
 
 function getTeacherAvgDenominator(cls, term) {
@@ -1786,7 +1803,7 @@ function renderStudents() {
   tbody.innerHTML=page.map((s,idx)=>{
     const sc=s.scores||{};
     const scoreCells=cols.map(col=>{
-      const raw=sc[col.column_name];
+      const raw=readScore(sc,col.column_name,col.term);
       const pct=raw!=null?(raw/col.max_score*100):null;
       const col2=pct!=null?(pct>=80?'s-a':pct>=70?'s-b':pct>=50?'s-c':pct>=40?'s-d':'s-fail'):'s-none';
       return `<td><span class="score ${col2}">${raw!=null?`${raw}<small style="color:var(--txt3);font-size:9px"> /${col.max_score}</small>`:'<span style="color:var(--txt3)">—</span>'}</span></td>`;
@@ -1795,8 +1812,8 @@ function renderStudents() {
     const ini=(s.full_name||'?').split(' ').map(n=>n[0]).slice(0,2).join('').toUpperCase();
 
     let teacherAvgDisplay = '—';
-    const numerator = getTeacherAvgNumerator(s, term);
-    if (avgDenom && numerator != null) {
+    if (avgDenom && avg != null) {
+      const numerator = avg * (avgDenom / 100);
       teacherAvgDisplay = `${numerator.toFixed(1)} / ${avgDenom}`;
     }
 
@@ -1936,24 +1953,16 @@ $i('saveAvgBtn').addEventListener('click', async () => {
   if (isNaN(X) || X <= 0) { toast('Enter a valid number greater than 0','warn'); return; }
   setBtn('saveAvgBtn', true, 'Applying...');
   try {
-    const students = APP.allStudents;
-    const cols = APP.currentCols;
     const term = APP.currentTerm;
     const suffix = getTermSuffix(term);
-    const updates = [];
-    for (const s of students) {
-      const Y = calcAvg(s, cols);
-      if (Y == null) continue;
-      const Z = Y * (X / 100);
-      const fieldName = 'teacher_avg_numerator' + suffix;
-      updates.push(sbFetch(`students?id=eq.${s.id}`, { method: 'PATCH', body: JSON.stringify({ [fieldName]: Z }) }));
-    }
+    // Only the conversion scale (denominator) needs to be stored — the numerator
+    // is now always derived live from each student's current, correctly-weighted
+    // average, so it never goes stale and never needs a per-student write.
     const denomField = 'teacher_avg_denominator' + suffix;
     await sbFetch(`classes?id=eq.${APP.currentClassId}`, { method: 'PATCH', body: JSON.stringify({ [denomField]: X }) });
-    await Promise.all(updates);
     closeModal('m-setAvg');
     await loadClassData(APP.currentClassId);
-    toast(`Teacher average set to /${X} for term ${term} (${students.length} students)`, 'success');
+    toast(`Teacher average scale set to /${X} for term ${term}`, 'success');
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   } finally {
@@ -2024,8 +2033,8 @@ window.openEditMarks = (sid, sname) => {
       <div>
         <label style="display:block;font-size:10.5px;font-weight:700;color:var(--txt2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.07em">${esc(col.column_name)} <span style="color:var(--txt3);font-weight:400">/ ${col.max_score}</span></label>
         <input type="number" min="0" max="${col.max_score}" step="0.5"
-          value="${scores[col.column_name]!=null?scores[col.column_name]:''}"
-          placeholder="0–${col.max_score}" data-col="${escA(col.column_name)}" data-max="${col.max_score}"
+          value="${readScore(scores,col.column_name,col.term)!=null?readScore(scores,col.column_name,col.term):''}"
+          placeholder="0–${col.max_score}" data-col="${escA(col.column_name)}" data-max="${col.max_score}" data-term="${col.term}"
           style="width:100%;padding:9px 11px;background:var(--bg-sec);border:1px solid var(--border);border-radius:var(--r-md);color:var(--txt);font-size:14px;font-family:'JetBrains Mono',monospace;transition:var(--tr)"
           oninput="updateMarksPreview()" onfocus="this.style.borderColor='var(--acc)'" onblur="this.style.borderColor='var(--border)'">
       </div>`).join('');
@@ -2035,10 +2044,10 @@ window.openEditMarks = (sid, sname) => {
 };
 window.updateMarksPreview = () => {
   const inputs=$i('m-marks-fields').querySelectorAll('input');
-  const vals=[];
-  inputs.forEach(inp=>{const v=parseFloat(inp.value),mx=parseFloat(inp.dataset.max||100);if(!isNaN(v))vals.push(v/mx*100);});
-  if (vals.length) {
-    const avg=vals.reduce((a,b)=>a+b,0)/vals.length; const g=gradeFromPct(avg);
+  let earned=0, possible=0;
+  inputs.forEach(inp=>{const v=parseFloat(inp.value),mx=parseFloat(inp.dataset.max||100);if(!isNaN(v)){earned+=v;possible+=mx;}});
+  if (possible>0) {
+    const avg=(earned/possible)*100; const g=gradeFromPct(avg);
     const el=$i('m-marks-avg');
     el.textContent=avg.toFixed(1)+'% — Grade '+g.grade+' ('+g.label+')';
     el.style.color=scoreColorFromPct(avg);
@@ -2048,8 +2057,13 @@ window.updateMarksPreview = () => {
 $i('saveMarksBtn').addEventListener('click',async()=>{
   const sid=$i('m-marksStuId').value;
   const inputs=$i('m-marks-fields').querySelectorAll('input');
-  const scores={};
-  inputs.forEach(inp=>{const v=parseFloat(inp.value);if(!isNaN(v))scores[inp.dataset.col]=Math.min(parseFloat(inp.dataset.max),Math.max(0,v));});
+  // Merge into the student's existing scores rather than replacing the whole
+  // object — this form only renders inputs for the CURRENT term's assessment
+  // columns, so a bare overwrite would silently delete every other term's
+  // previously saved marks for this student.
+  const stuBefore = APP.allStudents.find(s=>s.id===sid);
+  const scores = { ...(stuBefore?.scores || {}) };
+  inputs.forEach(inp=>{const v=parseFloat(inp.value);if(!isNaN(v))scores[scoreKey(inp.dataset.col,inp.dataset.term)]=Math.min(parseFloat(inp.dataset.max),Math.max(0,v));});
   setBtn('saveMarksBtn',true,'Saving…');
   try {
     await sbFetch(`students?id=eq.${sid}`,{method:'PATCH',body:JSON.stringify({scores})});
@@ -2106,7 +2120,7 @@ $i('saveColBtn').addEventListener('click',async()=>{
       let applied=0;
       for (const stu of APP.allStudents) {
         try {
-          const newScores={...(stu.scores||{}), [name]:batchMark};
+          const newScores={...(stu.scores||{}), [scoreKey(name,APP.currentTerm)]:batchMark};
           await sbFetch(`students?id=eq.${stu.id}`,{method:'PATCH',body:JSON.stringify({scores:newScores})});
           applied++;
         } catch {}
@@ -2139,10 +2153,21 @@ $i('manageColBtn').addEventListener('click',async()=>{
 window.deleteCol = (cid, cname) => {
   confirm2('Delete Column',`Delete column "${cname}" and all scores under it? This removes marks from all students for this term.`,async()=>{
     try {
+      const term = APP.currentTerm;
+      const scopedKey = scoreKey(cname, term);
+      // Only safe to also clear the legacy (un-namespaced) key if no OTHER
+      // term's column currently reuses this exact name — otherwise the plain
+      // key might actually belong to that other term's data, not this one.
+      const allColsForClass = await sbFetch(`assessment_columns?class_id=eq.${APP.currentClassId}`);
+      const nameUsedElsewhere = (allColsForClass||[]).some(c => c.id !== cid && c.column_name === cname);
       const stus=await sbFetch(`students?class_id=eq.${APP.currentClassId}`);
       for (const s of (stus||[])) {
-        if (s.scores && s.scores[cname]!=null) {
-          const newScores={...s.scores}; delete newScores[cname];
+        const hasScoped = s.scores && s.scores[scopedKey]!=null;
+        const hasLegacy = !nameUsedElsewhere && s.scores && s.scores[cname]!=null;
+        if (hasScoped || hasLegacy) {
+          const newScores={...s.scores};
+          delete newScores[scopedKey];
+          if (hasLegacy) delete newScores[cname];
           await sbFetch(`students?id=eq.${s.id}`,{method:'PATCH',body:JSON.stringify({scores:newScores})});
         }
       }
@@ -2212,7 +2237,7 @@ async function processImportRows(rows) {
           const raw=String(row[ci]||'').trim();
           if (raw!==''&&!isNaN(raw)) {
             const col=cols.find(c=>c.column_name===colName);
-            if (col) scores[colName]=Math.min(col.max_score,Math.max(0,parseFloat(raw)));
+            if (col) scores[scoreKey(colName,col.term)]=Math.min(col.max_score,Math.max(0,parseFloat(raw)));
           }
         });
       } else {
@@ -2222,7 +2247,7 @@ async function processImportRows(rows) {
           if (v!==''&&!isNaN(v)&&parseFloat(v)>=0) numCells.push(parseFloat(v));
         }
         cols.forEach((col,idx)=>{
-          if (numCells[idx]!=null) scores[col.column_name]=Math.min(col.max_score,Math.max(0,numCells[idx]));
+          if (numCells[idx]!=null) scores[scoreKey(col.column_name,col.term)]=Math.min(col.max_score,Math.max(0,numCells[idx]));
         });
       }
     }
@@ -2249,11 +2274,11 @@ $i('exportBtn').addEventListener('click',()=>{
   let csv='#,Student Name,'+cols.map(c=>`"${c.column_name} /${c.max_score}"`).join(',')+',Teacher Avg,Avg %,Grade,Term\n';
   const avgDenom = getTeacherAvgDenominator(cls, term);
   APP.dispStudents.forEach((s,i)=>{
-    const sc=s.scores||{}, vals=cols.map(c=>sc[c.column_name]!=null?sc[c.column_name]:'').join(',');
+    const sc=s.scores||{}, vals=cols.map(c=>{const r=readScore(sc,c.column_name,c.term);return r!=null?r:'';}).join(',');
     const avg=calcAvg(s,cols); const g=gradeFromPct(avg);
     let teacherAvgDisplay = '';
-    const numerator = getTeacherAvgNumerator(s, term);
-    if (avgDenom && numerator != null) {
+    if (avgDenom && avg != null) {
+      const numerator = avg * (avgDenom / 100);
       teacherAvgDisplay = `${numerator.toFixed(1)} / ${avgDenom}`;
     }
     csv+=`${i+1},"${s.full_name}",${vals},"${teacherAvgDisplay}",${avg!=null?avg.toFixed(1):''},${g.grade},${term}\n`;
@@ -2462,7 +2487,7 @@ $i('runPredBtn').addEventListener('click',async()=>{
     if (!stus||!stus.length) { results.innerHTML=`<div class="empty"><i class="fas fa-users"></i><p>No students in this class for Term ${term}</p></div>`; return; }
     const withRisk=stus.map(s=>{
       const avg=calcAvg(s,cols)||0;
-      const assessments=cols.map(c=>s.scores?.[c.column_name]!=null?(s.scores[c.column_name]/c.max_score*100):null).filter(v=>v!=null);
+      const assessments=cols.map(c=>{const r=readScore(s.scores,c.column_name,c.term);return r!=null?(r/c.max_score*100):null;}).filter(v=>v!=null);
       let trend='stable',trendVal=0;
       if (assessments.length>=2) {
         const half=Math.floor(assessments.length/2);
@@ -2818,6 +2843,7 @@ $i('genRptBtn').addEventListener('click',async()=>{
   const classId = $i('rpt-class').value;
   const term = parseInt($i('rpt-term').value);
   const year = $i('rpt-year').value;
+  const showTeacherAvg = $i('rpt-showTeacherAvg').checked;
   
   if (!classId) { toast('Select a class','warn'); return; }
   
@@ -2835,7 +2861,7 @@ $i('genRptBtn').addEventListener('click',async()=>{
       loadColsFromDB(classId, term),
       computeTeacherOverallAverage(term).catch(() => ({ overall: null, totalStu: 0, best: null, classCount: null }))
     ]);
-    generateReport(cls, stus||[], cols, term, year, teacherOverview);
+    generateReport(cls, stus||[], cols, term, year, teacherOverview, showTeacherAvg);
     try {
       await sbFetch('reports', {
         method: 'POST',
@@ -2862,7 +2888,7 @@ $i('genRptBtn').addEventListener('click',async()=>{
   }
 });
 
-function generateReport(cls, students, cols, term, year, teacherOverview) {
+function generateReport(cls, students, cols, term, year, teacherOverview, showTeacherAvg = true) {
   const preview = $i('report-preview');
   const termLabel = term === 1 ? 'I' : term === 2 ? 'II' : 'III';
   
@@ -2895,12 +2921,13 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
   const classAvg = validAvgs.length ? validAvgs.reduce((a,b) => a+b, 0) / validAvgs.length : null;
   const totalPass = avgs.filter(v => v != null && v >= 50).length;
 
-  // ─── TEACHER AVERAGE DATA ───
+  // ─── TEACHER AVERAGE DATA (derived live from each student's current, correctly
+  // marks-weighted average — never stale, never depends on a manual "Apply to All" step) ───
   const avgDenom = getTeacherAvgDenominator(cls, term);
-  const teacherAvgNumerators = sorted
-    .map(s => getTeacherAvgNumerator(s, term))
-    .filter(v => v != null);
-  const teacherAvgClassAvg = teacherAvgNumerators.length
+  const teacherAvgNumerators = avgs
+    .filter(v => v != null)
+    .map(v => v * (avgDenom / 100));
+  const teacherAvgClassAvg = avgDenom && teacherAvgNumerators.length
     ? teacherAvgNumerators.reduce((a, b) => a + b, 0) / teacherAvgNumerators.length
     : null;
 
@@ -2912,7 +2939,7 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
   const bodyRows = sorted.map((s,i) => {
     const sc = s.scores || {};
     const colCells = cols.map(col => {
-      const raw = sc[col.column_name];
+      const raw = readScore(sc, col.column_name, col.term);
       const pct = raw != null ? (raw / col.max_score * 100) : null;
       return `<td style="text-align:center">${raw != null ? raw : ''}</td><td style="text-align:center">${pct != null ? pct.toFixed(1) + '%' : ''}</td>`;
     }).join('');
@@ -2922,29 +2949,30 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
     const bgStyle = avg != null && avg < 50 ? 'background:#fff5f5' : '';
     
     let teacherAvgDisplay = '—';
-    const numerator = getTeacherAvgNumerator(s, term);
-    if (avgDenom && numerator != null) {
+    if (avgDenom && avg != null) {
+      const numerator = avg * (avgDenom / 100);
       teacherAvgDisplay = `${numerator.toFixed(1)} / ${avgDenom}`;
     }
+    const teacherAvgCell = showTeacherAvg ? `<td style="text-align:center;font-weight:700;color:#FF6600">${teacherAvgDisplay}</td>` : '';
     
     return `<tr style="${bgStyle}">
       <td style="text-align:center;font-weight:600">${i+1}</td>
       <td style="text-align:left;font-weight:600;padding-left:6px">${esc(s.full_name)}${s.registration_number ? `<br><span style="font-size:8px;font-weight:400;color:#666">${esc(s.registration_number)}</span>` : ''}</td>
       ${colCells}
       <td style="text-align:center;font-weight:700;color:${scoreColorHex(avg)}">${avg != null ? avg.toFixed(1) + '%' : '—'}</td>
-      <td style="text-align:center;font-weight:700;color:#FF6600">${teacherAvgDisplay}</td>
+      ${teacherAvgCell}
       <td style="text-align:center;font-weight:700">${g.grade}</td>
       <td style="text-align:center;font-weight:700;color:${passColor}">${avg != null ? (avg >= 50 ? 'PASS' : 'FAIL') : '—'}</td>
     </tr>`;
   }).join('');
 
   const totalsColCells = cols.map(col => {
-    const vals = sorted.map(s => s.scores?.[col.column_name]).filter(v => v != null);
+    const vals = sorted.map(s => readScore(s.scores, col.column_name, col.term)).filter(v => v != null);
     const avg = vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
     return `<td style="text-align:center;font-weight:700;background:#f0f0f0">${avg != null ? avg.toFixed(1) : ''}</td><td style="background:#f0f0f0"></td>`;
   }).join('');
 
-  const totalColspan = 2 + cols.length * 2 + 4;
+  const totalColspan = 2 + cols.length * 2 + 3 + (showTeacherAvg ? 1 : 0);
 
   function scoreColorHex(pct) {
     if (pct == null) return '#333';
@@ -3010,7 +3038,7 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
           <th rowspan="2" style="text-align:left;min-width:130px">STUDENT'S NAMES</th>
           ${colHeaders}
           <th rowspan="2" style="background:#bbc">%</th>
-          <th rowspan="2" style="background:#bbc;min-width:70px">TEACHER<br>AVG</th>
+          ${showTeacherAvg ? '<th rowspan="2" style="background:#bbc;min-width:70px">TEACHER<br>AVG</th>' : ''}
           <th rowspan="2" style="background:#bbc">GRADE</th>
           <th rowspan="2" style="background:#bbc">REMARKS</th>
         </tr>
@@ -3024,7 +3052,7 @@ function generateReport(cls, students, cols, term, year, teacherOverview) {
           <td colspan="2" style="text-align:right;padding:5px 8px;font-weight:700">CLASS AVERAGE →</td>
           ${totalsColCells}
           <td style="text-align:center;font-weight:700;color:${scoreColorHex(classAvg)}">${classAvg != null ? classAvg.toFixed(1) + '%' : '—'}</td>
-          <td style="text-align:center;font-weight:700;color:#FF6600">${avgDenom && teacherAvgClassAvg != null ? `${teacherAvgClassAvg.toFixed(1)} / ${avgDenom}` : '—'}</td>
+          ${showTeacherAvg ? `<td style="text-align:center;font-weight:700;color:#FF6600">${avgDenom && teacherAvgClassAvg != null ? `${teacherAvgClassAvg.toFixed(1)} / ${avgDenom}` : '—'}</td>` : ''}
           <td style="text-align:center">${classAvg != null ? gradeFromPct(classAvg).grade : '—'}</td>
           <td></td>
         </tr>
@@ -3127,11 +3155,11 @@ $i('exportXlsBtn').addEventListener('click', async () => {
         const avg = calcAvg(s, cols);
         const g = gradeFromPct(avg);
         let teacherAvg = '';
-        const numerator = getTeacherAvgNumerator(s, term);
-        if (avgDenom && numerator != null) {
+        if (avgDenom && avg != null) {
+          const numerator = avg * (avgDenom / 100);
           teacherAvg = `${numerator.toFixed(1)} / ${avgDenom}`;
         }
-        return [i + 1, s.full_name, s.registration_number || '', ...cols.map(c => s.scores?.[c.column_name] ?? ''), teacherAvg, avg != null ? avg.toFixed(1) : '', g.grade, avg != null ? (avg >= 50 ? 'PASS' : 'FAIL') : '', term];
+        return [i + 1, s.full_name, s.registration_number || '', ...cols.map(c => readScore(s.scores, c.column_name, c.term) ?? ''), teacherAvg, avg != null ? avg.toFixed(1) : '', g.grade, avg != null ? (avg >= 50 ? 'PASS' : 'FAIL') : '', term];
       });
       const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
       XLSX.utils.book_append_sheet(wb, ws, cls.class_name.slice(0, 31) + `_T${term}`);
@@ -3254,7 +3282,7 @@ $i('set-province')?.addEventListener('change', e => populateDistricts(e.target.v
 async function computeTeacherOverallAverage(term) {
   await loadClasses();
   let totalStu = 0, best = null;
-  const classAvgs = [];
+  let sumAllStudentAvgs = 0, countAllStudentAvgs = 0;
   for (const cls of APP.classes) {
     try {
       const [stus, cols] = await Promise.all([sbFetch(`students?class_id=eq.${cls.id}`), loadColsFromDB(cls.id, term)]);
@@ -3262,13 +3290,16 @@ async function computeTeacherOverallAverage(term) {
       const avgs = s.map(st => calcAvg(st, cols)).filter(v => v != null);
       const avg = avgs.length ? avgs.reduce((a,b)=>a+b,0)/avgs.length : null;
       totalStu += s.length;
+      // Weight the overall average by student count, not by class count — a
+      // 44-student class and a 5-student class should not count equally.
+      sumAllStudentAvgs += avgs.reduce((a,b)=>a+b,0);
+      countAllStudentAvgs += avgs.length;
       if (avg != null) {
-        classAvgs.push(avg);
         if (!best || avg > best.avg) best = { name: cls.class_name, avg };
       }
     } catch {}
   }
-  const overall = classAvgs.length ? classAvgs.reduce((a,b)=>a+b,0)/classAvgs.length : null;
+  const overall = countAllStudentAvgs ? sumAllStudentAvgs / countAllStudentAvgs : null;
   return { overall, totalStu, best, classCount: APP.classes.length };
 }
 
